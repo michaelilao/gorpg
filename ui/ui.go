@@ -8,8 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/michaelilao/rpg/game"
+	"github.com/michaelilao/gorpg/game"
 	"github.com/veandco/go-sdl2/sdl"
+	"github.com/veandco/go-sdl2/ttf"
 )
 
 func checkError(err error) {
@@ -26,7 +27,7 @@ type ui struct {
 	renderer          *sdl.Renderer
 	window            *sdl.Window
 	textureAtlas      *sdl.Texture
-	textureIndex      map[game.Tile][]sdl.Rect
+	textureIndex      map[rune][]sdl.Rect
 	prevKeyBoardState []uint8
 	keyboardState     []uint8
 	centerX           int
@@ -34,10 +35,17 @@ type ui struct {
 	r                 *rand.Rand
 	levelChan         chan *game.Level
 	inputChan         chan *game.Input
+	fontSmall         *ttf.Font
+	fontMedium        *ttf.Font
+	fontLarge         *ttf.Font
+	eventBackground   *sdl.Texture
+	str2TexSm         map[string]*sdl.Texture
+	str2TexMd         map[string]*sdl.Texture
+	str2TexLg         map[string]*sdl.Texture
 }
 
 func (ui *ui) loadTextureIndex() {
-	ui.textureIndex = make(map[game.Tile][]sdl.Rect)
+	ui.textureIndex = make(map[rune][]sdl.Rect)
 	infile, err := os.Open("ui/assets/atlas-index.txt")
 	checkError(err)
 	scanner := bufio.NewScanner(infile)
@@ -45,7 +53,7 @@ func (ui *ui) loadTextureIndex() {
 	for scanner.Scan() {
 		line := scanner.Text()
 		line = strings.TrimSpace(line)
-		tileRune := game.Tile(line[0])
+		tileRune := rune(line[0])
 		xy := line[1:]
 		splitXYC := strings.Split(xy, ",")
 		x, err := strconv.ParseInt(strings.TrimSpace(splitXYC[0]), 10, 64)
@@ -106,11 +114,18 @@ func (ui *ui) imgFileToTexture(filename string) *sdl.Texture {
 func init() {
 	err := sdl.Init(sdl.INIT_EVERYTHING)
 	checkError(err)
+
+	err = ttf.Init()
+	checkError(err)
 }
 
 func NewUI(inputChan chan *game.Input, levelChan chan *game.Level) *ui {
 	ui := &ui{}
 	ui.inputChan = inputChan
+	ui.str2TexSm = make(map[string]*sdl.Texture)
+	ui.str2TexMd = make(map[string]*sdl.Texture)
+	ui.str2TexLg = make(map[string]*sdl.Texture)
+
 	ui.levelChan = levelChan
 	ui.r = rand.New(rand.NewSource(1))
 	ui.winWidth = winWidth
@@ -138,6 +153,17 @@ func NewUI(inputChan chan *game.Input, levelChan chan *game.Level) *ui {
 	ui.centerY = -1
 	checkError(err)
 
+	ui.fontSmall, err = ttf.OpenFont("ui/assets/font.ttf", int(float64(ui.winWidth)*0.015))
+	checkError(err)
+
+	ui.fontMedium, err = ttf.OpenFont("ui/assets/font.ttf", 32)
+	checkError(err)
+
+	ui.fontLarge, err = ttf.OpenFont("ui/assets/font.ttf", 64)
+	checkError(err)
+
+	ui.eventBackground = ui.getSinglePixelTex(sdl.Color{0, 0, 0, 128})
+	ui.eventBackground.SetBlendMode(sdl.BLENDMODE_BLEND)
 	return ui
 }
 func (ui *ui) Draw(level *game.Level) {
@@ -161,32 +187,133 @@ func (ui *ui) Draw(level *game.Level) {
 	ui.r.Seed(1)
 	for y, row := range level.Map {
 		for x, tile := range row {
-			if tile != game.Blank {
-				srcRects := ui.textureIndex[tile]
+			if tile.Rune != game.Blank {
+				srcRects := ui.textureIndex[tile.Rune]
 				srcRect := srcRects[ui.r.Intn(len(srcRects))]
-				destRect := sdl.Rect{int32(x*32) + offSetX, int32(y*32) + offSetY, 32, 32}
+				if tile.Visible || tile.Seen {
+					destRect := sdl.Rect{int32(x*32) + offSetX, int32(y*32) + offSetY, 32, 32}
+					pos := game.Pos{x, y}
+					if level.Debug[pos] {
+						ui.textureAtlas.SetColorMod(128, 0, 0)
+					} else if tile.Seen && !tile.Visible {
+						ui.textureAtlas.SetColorMod(128, 128, 128)
+					} else {
+						ui.textureAtlas.SetColorMod(255, 255, 255)
+					}
+					ui.renderer.Copy(ui.textureAtlas, &srcRect, &destRect)
 
-				pos := game.Pos{x, y}
-				if level.Debug[pos] {
-					ui.textureAtlas.SetColorMod(128, 0, 0)
-				} else {
-					ui.textureAtlas.SetColorMod(255, 255, 255)
+					if tile.OverlayRune != game.Blank {
+						srcRect := ui.textureIndex[tile.OverlayRune][0]
+						ui.renderer.Copy(ui.textureAtlas, &srcRect, &destRect)
+					}
 				}
-				ui.renderer.Copy(ui.textureAtlas, &srcRect, &destRect)
 			}
 		}
 	}
 	//21,59
-
+	ui.textureAtlas.SetColorMod(255, 255, 255)
 	for pos, monster := range level.Monsters {
-		monsterSrcRect := ui.textureIndex[game.Tile(monster.Rune)][0]
-		ui.renderer.Copy(ui.textureAtlas, &monsterSrcRect, &sdl.Rect{int32(pos.X*32) + offSetX, int32(pos.Y*32) + offSetY, 32, 32})
+		if level.Map[pos.Y][pos.X].Visible {
+			monsterSrcRect := ui.textureIndex[(monster.Rune)][0]
+			ui.renderer.Copy(ui.textureAtlas, &monsterSrcRect, &sdl.Rect{int32(pos.X*32) + offSetX, int32(pos.Y*32) + offSetY, 32, 32})
+		}
 	}
 	playerSrcRect := ui.textureIndex['@'][0]
 	ui.renderer.Copy(ui.textureAtlas, &playerSrcRect, &sdl.Rect{int32(level.Player.X*32) + offSetX, int32(level.Player.Y*32) + offSetY, 32, 32})
+
+	textStart := int(float64(ui.winHeight) * .68)
+	textWidth := int(float64(ui.winWidth) * .25)
+	ui.renderer.Copy(ui.eventBackground, nil, &sdl.Rect{0, int32(textStart), int32(textWidth), int32(ui.winHeight - textStart)})
+
+	i := level.EventPos
+	count := 0
+
+	_, fontSizeY, _ := ui.fontSmall.SizeUTF8("A")
+	for {
+		event := level.Events[i]
+		if event != "" {
+			tex := ui.stringToTexture(event, sdl.Color{255, 0, 0, 0}, FontSmall)
+			_, _, w, h, err := tex.Query()
+			checkError(err)
+			ui.renderer.Copy(tex, nil, &sdl.Rect{5, int32(count*fontSizeY) + int32(textStart), w, h})
+		}
+		i = (i + 1) % (len(level.Events))
+		count++
+		if i == level.EventPos {
+			break
+		}
+	}
 	ui.renderer.Present()
 	ui.renderer.Clear()
 
+}
+
+type FontSize int
+
+const (
+	FontSmall FontSize = iota
+	FontMedium
+	FontLarge
+)
+
+func (ui *ui) stringToTexture(s string, color sdl.Color, size FontSize) *sdl.Texture {
+	var font *ttf.Font
+	switch size {
+	case FontSmall:
+		font = ui.fontSmall
+		tex, exists := ui.str2TexSm[s]
+		if exists {
+			return tex
+		}
+	case FontMedium:
+		font = ui.fontMedium
+		tex, exists := ui.str2TexMd[s]
+		if exists {
+			return tex
+		}
+	case FontLarge:
+		font = ui.fontLarge
+		tex, exists := ui.str2TexLg[s]
+		if exists {
+			return tex
+		}
+	}
+
+	fontSurface, err := font.RenderUTF8Blended(s, color)
+	checkError(err)
+
+	tex, err := ui.renderer.CreateTextureFromSurface(fontSurface)
+	checkError(err)
+	switch size {
+	case FontSmall:
+		ui.str2TexSm[s] = tex
+	case FontMedium:
+		ui.str2TexMd[s] = tex
+	case FontLarge:
+		ui.str2TexLg[s] = tex
+	}
+
+	return tex
+}
+func (ui *ui) keyDownOnce(key uint8) bool {
+	return ui.keyboardState[key] == 1 && ui.prevKeyBoardState[key] == 0
+}
+
+func (ui *ui) keyPressed(key uint8) bool {
+	return ui.keyboardState[key] == 0 && ui.prevKeyBoardState[key] == 1
+}
+
+func (ui *ui) getSinglePixelTex(color sdl.Color) *sdl.Texture {
+	tex, err := ui.renderer.CreateTexture(sdl.PIXELFORMAT_ABGR8888, sdl.TEXTUREACCESS_STATIC, 1, 1)
+	checkError(err)
+
+	pixels := make([]byte, 4)
+	pixels[0] = color.R
+	pixels[1] = color.G
+	pixels[2] = color.B
+	pixels[3] = color.A
+	tex.Update(nil, pixels, 4)
+	return tex
 }
 
 func (ui *ui) Run() {
@@ -214,20 +341,17 @@ func (ui *ui) Run() {
 		if sdl.GetKeyboardFocus() == ui.window && sdl.GetMouseFocus() == ui.window {
 
 			var input game.Input
-			if ui.keyboardState[sdl.SCANCODE_UP] == 1 && ui.prevKeyBoardState[sdl.SCANCODE_UP] == 0 {
+			if ui.keyDownOnce(sdl.SCANCODE_UP) {
 				input.Typ = game.Up
 			}
-			if ui.keyboardState[sdl.SCANCODE_DOWN] == 1 && ui.prevKeyBoardState[sdl.SCANCODE_DOWN] == 0 {
+			if ui.keyDownOnce(sdl.SCANCODE_DOWN) {
 				input.Typ = game.Down
 			}
-			if ui.keyboardState[sdl.SCANCODE_LEFT] == 1 && ui.prevKeyBoardState[sdl.SCANCODE_LEFT] == 0 {
+			if ui.keyDownOnce(sdl.SCANCODE_LEFT) {
 				input.Typ = game.Left
 			}
-			if ui.keyboardState[sdl.SCANCODE_RIGHT] == 1 && ui.prevKeyBoardState[sdl.SCANCODE_RIGHT] == 0 {
+			if ui.keyDownOnce(sdl.SCANCODE_RIGHT) {
 				input.Typ = game.Right
-			}
-			if ui.keyboardState[sdl.SCANCODE_S] == 1 && ui.prevKeyBoardState[sdl.SCANCODE_S] == 0 {
-				input.Typ = game.Search
 			}
 			for i, v := range ui.keyboardState {
 				ui.prevKeyBoardState[i] = v

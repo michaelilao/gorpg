@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/michaelilao/rpg/game"
-	"github.com/michaelilao/rpg/ui"
+	"github.com/michaelilao/gorpg/game"
+	"github.com/michaelilao/gorpg/ui"
 )
 
 const numWindows = 1
