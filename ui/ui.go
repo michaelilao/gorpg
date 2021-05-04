@@ -172,6 +172,7 @@ func (ui *ui) Draw(level *game.Level) {
 		ui.centerY = level.Player.Y
 	}
 	limit := 7
+	//Todo make centering smarter so portals work
 	if level.Player.X > ui.centerX+limit {
 		ui.centerX++
 	} else if level.Player.X < ui.centerX-limit {

@@ -11,7 +11,8 @@ import (
 const numWindows = 1
 
 func main() {
-	game := game.NewGame(numWindows, "game/maps/level1.map")
+	game := game.NewGame(numWindows)
+
 	for i := 0; i < numWindows; i++ {
 		go func(i int) {
 			runtime.LockOSThread()
